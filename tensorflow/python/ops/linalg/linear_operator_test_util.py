@@ -20,6 +20,7 @@ from __future__ import print_function
 
 import abc
 import itertools
+
 import numpy as np
 import six
 
@@ -87,12 +88,14 @@ class LinearOperatorDerivedClassTest(test.TestCase):
       dtypes.complex128: 1e-12
   }
 
-  def assertAC(self, x, y):
+  def assertAC(self, x, y, check_dtype=False):
     """Derived classes can set _atol, _rtol to get different tolerance."""
     dtype = dtypes.as_dtype(x.dtype)
     atol = self._atol[dtype]
     rtol = self._rtol[dtype]
     self.assertAllClose(x, y, atol=atol, rtol=rtol)
+    if check_dtype:
+      self.assertDTypeEqual(x, y.dtype)
 
   @staticmethod
   def adjoint_options():
@@ -452,6 +455,11 @@ def _test_cond(use_placeholder, shapes_info, dtype):
       if 0 in shapes_info.shape[-2:]:
         return
 
+      # ROCm platform does not yet support complex types
+      if test.is_built_with_rocm() and \
+         ((dtype == dtypes.complex64) or (dtype == dtypes.complex128)):
+        return
+
       sess.graph.seed = random_seed.DEFAULT_GRAPH_SEED
       # Ensure self-adjoint and PD so we get finite condition numbers.
       operator, mat = self.operator_and_matrix(
@@ -559,7 +567,7 @@ def _test_inverse(use_placeholder, shapes_info, dtype):
           shapes_info, dtype, use_placeholder=use_placeholder)
       op_inverse_v, mat_inverse_v = sess.run([
           operator.inverse().to_dense(), linalg.inv(mat)])
-      self.assertAC(op_inverse_v, mat_inverse_v)
+      self.assertAC(op_inverse_v, mat_inverse_v, check_dtype=True)
   return test_inverse
 
 

@@ -23,8 +23,8 @@ limitations under the License.
 #include <unordered_map>
 #include <vector>
 
-#include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/platform/cord.h"
+#include "tensorflow/core/platform/errors.h"
 #include "tensorflow/core/platform/file_statistics.h"
 #include "tensorflow/core/platform/macros.h"
 #include "tensorflow/core/platform/platform.h"
@@ -34,6 +34,7 @@ limitations under the License.
 #ifdef PLATFORM_WINDOWS
 #undef DeleteFile
 #undef CopyFile
+#undef TranslateName
 #endif
 
 namespace tensorflow {

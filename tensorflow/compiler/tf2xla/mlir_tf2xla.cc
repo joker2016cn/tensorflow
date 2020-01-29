@@ -77,8 +77,7 @@ Status ConvertOutputInfo(const tf2xla::Config& config,
     array_names.push_back(fetch.id().node_name());
   }
 
-  return ParseOutputArrayInfo(array_names, &specs->output_arrays,
-                              &specs->output_arrays_order);
+  return ParseOutputArrayInfo(array_names, &specs->outputs);
 }
 
 }  // namespace
@@ -89,7 +88,7 @@ Status ConvertGraphDefToXlaViaMlir(const GraphDef& graph_def,
   GraphDebugInfo debug_info;
   mlir::MLIRContext context;
   GraphImportConfig specs;
-  specs.prune_unused_nodes = false;
+  specs.prune_unused_nodes = true;
   specs.convert_legacy_fed_inputs = false;
   specs.graph_as_function = false;
   specs.upgrade_legacy = false;
@@ -110,7 +109,7 @@ Status ConvertGraphDefToXlaViaMlir(const GraphDef& graph_def,
   AddDevicesToOp(*module, &device_set);
 
   TF_RETURN_IF_ERROR(mlir::TF::RunBridgeWithStandardPipeline(
-      *module, /*enable_logging=*/VLOG_IS_ON(1)));
+      *module, /*enable_logging=*/VLOG_IS_ON(1), /*enable_inliner=*/true));
 
   // Convert the MLIR module to XLA computation. If the input graph can't be
   // lowered down to a single graph node with a single island by the previous

@@ -101,6 +101,7 @@ FunctionDefLibrary GetFunctionDefLibraryStub(
     *(fn_stub->mutable_signature()) = fn.signature();
     *(fn_stub->mutable_attr()) = fn.attr();
     *(fn_stub->mutable_arg_attr()) = fn.arg_attr();
+    *(fn_stub->mutable_resource_arg_unique_id()) = fn.resource_arg_unique_id();
   }
   *stub.mutable_gradient() = fdef_lib.gradient();
   return stub;
@@ -221,7 +222,7 @@ Status MetaOptimizer::InitializeOptimizers(
   if (cfg_.function_optimization() != RewriterConfig::OFF) {
     optimizers->push_back(MakeUnique<FunctionOptimizer>(
         cfg_.function_optimization(),
-        /*lower_contorl_flow=*/!IsSingleThreadedExecutor()));
+        /*lower_control_flow=*/!IsSingleThreadedExecutor()));
   }
   if (cfg_.debug_stripper() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<DebugStripper>());
@@ -799,7 +800,7 @@ Status MetaOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
 
   VLOG(1) << "Optimized " << optimized_funcs.size()
           << " functions: " << absl::StrJoin(optimized_funcs, ", ");
-
+  VLOG(3) << "Optimized graph =\n" << optimized_graph->DebugString();
   if (VLOG_IS_ON(1)) {
     DumpGraphDefToFile(
         strings::StrCat("after_MetaOptimizer_",

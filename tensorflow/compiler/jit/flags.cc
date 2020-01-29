@@ -13,13 +13,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include "tensorflow/compiler/jit/flags.h"
+
 #include <mutex>  // NOLINT
 
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/strip.h"
-#include "tensorflow/compiler/jit/flags.h"
 #include "tensorflow/compiler/xla/parse_flags_from_env.h"
+#include "tensorflow/core/platform/macros.h"
 #include "tensorflow/core/util/command_line_flags.h"
 
 namespace tensorflow {
@@ -48,6 +50,15 @@ bool SetterForXlaAutoJitFlag(const string& value) {
     return true;
   }
 
+  if (value == "fusible") {
+    mark_for_compilation_flags->xla_auto_jit_flag
+        .optimization_level_single_gpu = 1;
+    mark_for_compilation_flags->xla_auto_jit_flag.optimization_level_general =
+        1;
+    mark_for_compilation_flags->tf_xla_ops_to_cluster = "FUSIBLE";
+    return true;
+  }
+
   absl::string_view value_sv(value);
   if (!absl::ConsumePrefix(&value_sv, "single-gpu(") ||
       !absl::ConsumeSuffix(&value_sv, ")") ||
@@ -65,7 +76,9 @@ void AppendMarkForCompilationPassFlagsInternal(std::vector<Flag>* flag_list) {
       Flag("tf_xla_auto_jit", SetterForXlaAutoJitFlag, "0",
            "Control compilation of operators into XLA computations on CPU and "
            "GPU devices.  0 = use ConfigProto setting; -1 = off; 1 = on for "
-           "things very likely to be improved; 2 = on for everything.  "
+           "things very likely to be improved; 2 = on for everything; "
+           "(experimental) fusible = only for Tensorflow operations that XLA "
+           "knows how to fuse.  "
            "If set to single-gpu(<N>) then this resolves to <N> for single-GPU "
            "graphs (graphs that have at least one node placed on a GPU and no "
            "more than one GPU is in use through the entire graph) and 0 "
@@ -78,6 +91,23 @@ void AppendMarkForCompilationPassFlagsInternal(std::vector<Flag>* flag_list) {
       Flag("tf_xla_max_cluster_size",
            &mark_for_compilation_flags->tf_xla_max_cluster_size,
            "Maximum number of operators in an XLA compilation."),
+      Flag(
+          "tf_xla_ops_to_cluster",
+          &mark_for_compilation_flags->tf_xla_ops_to_cluster,
+          "(experimental) "
+          "Limit the operations clustered by XLA to these operations. "
+          "If multiple, separate them with commas. Shortcuts: "
+          " PW: All point-wise operations."
+          " RED: All reduction operations."
+          " MISC: Mixed operations."
+          " PWRED: TF operations that get converted to PW+RED operation in XLA."
+          " REDUCEWINDOW: TF operations like MaxPool/AvgPool that get "
+          "converted to ReduceWindow in XLA."
+          " REDUCEWINDOWPW: Operation that get converted to ReduceWindow + PW "
+          "(LRN, LRNGrad)."
+          " BN: TF FusedBatchNorm* operations."
+          " FUSIBLE: All TF operations that XLA can fuse (All the above). "
+          "You can also put any TF operation name, e.g. 'FUSIBLE,Matmul'."),
       Flag("tf_xla_clustering_debug",
            &mark_for_compilation_flags->tf_xla_clustering_debug,
            "Dump graphs during XLA compilation."),
@@ -127,6 +157,7 @@ void AllocateAndParseFlags() {
 
   device_flags = new XlaDeviceFlags;
   device_flags->tf_xla_compile_on_demand = false;
+  device_flags->tf_xla_enable_xla_devices = true;
 
   ops_flags = new XlaOpsCommonFlags;
   ops_flags->tf_xla_always_defer_compilation = false;
@@ -158,6 +189,12 @@ void AllocateAndParseFlags() {
        Flag("tf_xla_compile_on_demand", &device_flags->tf_xla_compile_on_demand,
             "Switch a device into 'on-demand' mode, where instead of "
             "autoclustering ops are compiled one by one just-in-time."),
+
+       Flag("tf_xla_enable_xla_devices",
+            &device_flags->tf_xla_enable_xla_devices,
+            "Generate XLA_* devices, where placing a computation on such a "
+            "device"
+            "forces compilation by XLA. Deprecated."),
 
        Flag("tf_xla_always_defer_compilation",
             &ops_flags->tf_xla_always_defer_compilation, ""),
@@ -212,4 +249,11 @@ void AppendMarkForCompilationPassFlags(std::vector<Flag>* flag_list) {
   std::call_once(flags_init, &AllocateAndParseFlags);
   AppendMarkForCompilationPassFlagsInternal(flag_list);
 }
+
+static bool xla_is_enabled = false;
+
+void SetXlaIsEnabled() { xla_is_enabled = true; }
+
+bool IsXlaEnabled() { return xla_is_enabled; }
+
 }  // namespace tensorflow

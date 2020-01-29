@@ -378,8 +378,8 @@ def _run_batchnorm_correctness_test(layer, dtype='float32', fused=False):
   out -= keras.backend.eval(norm.beta)
   out /= keras.backend.eval(norm.gamma)
 
-  np.testing.assert_allclose(out.mean(), 0.0, atol=1e-1)
-  np.testing.assert_allclose(out.std(), 1.0, atol=1e-1)
+  np.testing.assert_allclose(out.mean(), 0.0, atol=2e-1)
+  np.testing.assert_allclose(out.std(), 1.0, atol=2e-1)
 
 
 @parameterized.parameters(
@@ -620,7 +620,7 @@ class LayerNormalizationTest(keras_parameterized.TestCase):
   @tf_test_util.run_in_graph_and_eager_modes
   def testIncorrectAxisType(self):
     with self.assertRaisesRegexp(
-        ValueError, r'Expected an int or a list/tuple of ints'):
+        TypeError, r'Expected an int or a list/tuple of ints'):
       _ = normalization.LayerNormalization(axis={'axis': -1})
 
   @tf_test_util.run_in_graph_and_eager_modes

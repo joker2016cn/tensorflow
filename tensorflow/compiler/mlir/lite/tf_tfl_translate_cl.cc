@@ -30,7 +30,7 @@ opt<std::string> output_file_name("o", llvm::cl::desc("<output file>"),
 opt<bool> use_splatted_constant(
     "use-splatted-constant",
     llvm::cl::desc(
-        "Replace constants with randonmly generated splatted tensors"),
+        "Replace constants with randomly generated splatted tensors"),
     llvm::cl::init(false), llvm::cl::Hidden);
 // NOLINTNEXTLINE
 opt<bool> input_mlir(
@@ -79,5 +79,7 @@ opt<std::string> quant_stats_file_name("quant-stats",
 
 // NOLINTNEXTLINE
 opt<bool> inline_functions(
-    "inline", llvm::cl::desc("Inline function calls within the main function "
-                             "before legalization to TFLite."));
+    "inline",
+    llvm::cl::desc("Inline function calls within the main function "
+                   "before legalization to TFLite."),
+    llvm::cl::init(true));

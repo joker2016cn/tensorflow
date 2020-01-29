@@ -18,6 +18,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import abc
 import collections
 import contextlib
 import functools
@@ -290,6 +291,32 @@ class ApiTest(test.TestCase):
         options=DEFAULT_RECURSIVE)
     self.assertEqual((1, 2, 3), self.evaluate(x))
 
+  @test_util.run_v1_only('b/120545219')
+  def test_converted_call_functools_partial_kwarg_mutation(self):
+    def test_fn(x, y, z):
+      if x < 0:
+        return -x, -y, -z
+      return x, y, z
+
+    partial_fn = functools.partial(test_fn, constant_op.constant(-1), z=-3)
+    # Call using kwargs to assign y first to ensure that partial_fn.keywords is
+    # not mutated for subsequent calls (where y is assign through args).
+    x = api.converted_call(
+        partial_fn,
+        args=(),
+        kwargs={
+            'y': constant_op.constant(-2),
+        },
+        options=DEFAULT_RECURSIVE)
+    self.assertEqual((1, 2, 3), self.evaluate(x))
+
+    x = api.converted_call(
+        partial_fn,
+        args=(constant_op.constant(-4),),
+        kwargs=None,
+        options=DEFAULT_RECURSIVE)
+    self.assertEqual((1, 4, 3), self.evaluate(x))
+
   def test_converted_call_method(self):
 
     class TestClass(object):
@@ -416,20 +443,49 @@ class ApiTest(test.TestCase):
 
   def test_converted_call_callable_metaclass(self):
 
+    test_self = self
+
     class TestMetaclass(type):
 
       def __call__(cls):
         self.assertTrue(converter_testing.is_inside_generated_code())
         inst = object.__new__(cls)
         inst.__init__()
+
+        def instance_call(unused_self):
+          test_self.fail(
+              'The class-bound __call__ should be called, not the instance'
+              ' bound one.')
+
+        inst.__call__ = instance_call
         return inst
 
     tmc = TestMetaclass('TestClass', (), {})
-    # This functools.partial will hide the class form the constructor
-    # check. Not ideal. See b/120224672.
-    tc = api.converted_call(
-        functools.partial(tmc), (), None, options=DEFAULT_RECURSIVE)
+    tc = api.converted_call(tmc, (), None, options=DEFAULT_RECURSIVE)
     self.assertIsInstance(tc, tmc)
+
+  def test_converted_call_callable_abc(self):
+
+    test_self = self
+
+    @six.add_metaclass(abc.ABCMeta)
+    class TestBase(object):
+
+      @abc.abstractmethod
+      def __call__(self):
+        test_self.fail('This should not be called')
+
+    class TestSubclass(TestBase):
+
+      def __init__(self):
+        test_self.assertFalse(converter_testing.is_inside_generated_code())
+
+      def __call__(self, expected):
+        test_self.assertTrue(expected)
+        test_self.assertTrue(converter_testing.is_inside_generated_code())
+
+    tc = api.converted_call(TestSubclass, (), None, options=DEFAULT_RECURSIVE)
+    api.converted_call(tc, (True,), None, options=DEFAULT_RECURSIVE)
 
   @test_util.run_deprecated_v1
   def test_converted_call_constructor(self):
@@ -466,6 +522,15 @@ class ApiTest(test.TestCase):
       api.converted_call(tc.test_method, (), None, options=DEFAULT_RECURSIVE)
     ag_logging.set_verbosity(0, False)
     os.environ['AUTOGRAPH_STRICT_CONVERSION'] = '1'
+
+  def test_converted_call_partial_of_whitelisted_method(self):
+
+    def test_fn(_):
+      self.assertFalse(converter_testing.is_inside_generated_code())
+
+    converter_testing.whitelist(test_fn)
+    api.converted_call(
+        functools.partial(test_fn, None), (), None, options=DEFAULT_RECURSIVE)
 
   def test_converted_call_already_converted(self):
 
@@ -973,7 +1038,7 @@ class ApiTest(test.TestCase):
       return x
 
     # Just check that the output is parseable Python code.
-    self.assertIsNotNone(parser.parse_str(api.to_code(test_fn)))
+    self.assertIsNotNone(parser.parse(api.to_code(test_fn)))
 
   def test_to_code_with_wrapped_function(self):
 

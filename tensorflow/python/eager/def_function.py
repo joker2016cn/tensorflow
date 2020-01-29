@@ -23,6 +23,7 @@ import functools
 import threading
 import weakref
 
+from tensorflow.python import pywrap_tfe
 from tensorflow.python.eager import context
 from tensorflow.python.eager import function as function_lib
 from tensorflow.python.eager import lift_to_graph
@@ -405,7 +406,7 @@ class Function(object):
     self._implements = experimental_implements
     self._autograph = autograph
     self._experimental_autograph_options = experimental_autograph_options
-    self.experimental_relax_shapes = experimental_relax_shapes
+    self._experimental_relax_shapes = experimental_relax_shapes
     self._experimental_compile = experimental_compile
     self._created_variables = None  # GUARDED_BY(self._lock)
     self._stateful_fn = None  # GUARDED_BY(self._lock)
@@ -449,7 +450,13 @@ class Function(object):
     if self._implements is not None:
       attributes[function_lib.IMPLEMENTS_ATTRIBUTE_NAME] = self._implements
     if self._experimental_compile is not None:
-      attributes.update(_XlaCompile=bool(self._experimental_compile))
+      attributes.update(_XlaMustCompile=bool(self._experimental_compile))
+      if self._experimental_compile:
+        attributes.update(_noinline=True)
+        if not pywrap_tfe.TF_IsXlaEnabled():
+          raise ValueError("Attempting to use experimental_compile, "
+                           "but XLA support is not linked in. "
+                           "Rebuild with --define=with_xla_support=true.")
     if not attributes:
       attributes = None
     return function_lib.defun_with_attributes(
@@ -458,7 +465,8 @@ class Function(object):
         attributes=attributes,
         autograph=self._autograph,
         experimental_autograph_options=self._experimental_autograph_options,
-        experimental_relax_shapes=self.experimental_relax_shapes)
+        experimental_compile=self._experimental_compile,
+        experimental_relax_shapes=self._experimental_relax_shapes)
 
   def _initialize(self, args, kwds, add_initializers_to=None):
     """Initializes, on the first call.
@@ -514,7 +522,7 @@ class Function(object):
         autograph=self._autograph,
         experimental_implements=self._implements,
         experimental_autograph_options=self._experimental_autograph_options,
-        experimental_relax_shapes=self.experimental_relax_shapes,
+        experimental_relax_shapes=self._experimental_relax_shapes,
         experimental_compile=self._experimental_compile)
 
   def _decorate(self, decorator):
@@ -728,13 +736,20 @@ class Function(object):
               resource_variable_ops.var_is_initialized_op(v.handle))
         var_is_initialized = array_ops.stack(var_is_initialized).numpy()
 
+      inits = []
       for (v, init), is_initialized in zip(initializers, var_is_initialized):
         with ops.init_scope():
           if is_initialized:
             continue
+        inits.append(init)
 
+      if inits:
         op_map = lift_to_graph.lift_to_graph(
-            [init], ops.get_default_graph(), op_map=op_map)
+            inits, ops.get_default_graph(), op_map=op_map)
+      for (v, init), is_initialized in zip(initializers, var_is_initialized):
+        with ops.init_scope():
+          if is_initialized:
+            continue
         v.assign(op_map[init], read_value=False)
 
     with ops.init_scope():
@@ -786,7 +801,7 @@ class Function(object):
     """Returns all concrete functions for serialization.
 
     Returns:
-      A list of instances of `Function`.
+      A list of instances of `ConcreteFunction`.
     """
     if self.input_signature is not None:
       self.get_concrete_function()
@@ -1107,7 +1122,7 @@ def function(func=None,
   the graphs traced. The input signature specifies the shape and type of each
   Tensor argument to the function using a `tf.TensorSpec` object. More general
   shapes can be used. This is useful to avoid creating multiple graphs when
-  Tensors have dynamic shapes. It also restricts the dhape and datatype of
+  Tensors have dynamic shapes. It also restricts the shape and datatype of
   Tensors that can be used:
 
   >>> @tf.function(
@@ -1186,6 +1201,10 @@ def function(func=None,
      function (and return zero or more `tf.Tensor` objects).
      If `func` is None, returns a decorator that, when invoked with a single
      `func` argument, returns a callable equivalent to the case above.
+
+  Raises:
+     ValueError when attempting to use experimental_compile, but XLA support is
+     not enabled.
   """
   if input_signature is not None:
     function_lib.validate_signature(input_signature)
@@ -1197,7 +1216,8 @@ def function(func=None,
       name = "function"
     return tf_decorator.make_decorator(
         inner_function,
-        Function(
+        decorator_name="tf.function",
+        decorator_func=Function(
             inner_function,
             name,
             input_signature=input_signature,
